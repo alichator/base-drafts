@@ -135,10 +135,13 @@ including its signaling.  This allows the protocol to evolve without incurring a
 dependency on upgrades to middleboxes.  This document describes the core QUIC
 protocol, including the conceptual design, wire format, and mechanisms of the
 QUIC protocol for connection establishment, stream multiplexing, stream and
-connection-level flow control, connection migration, and data reliability.
+connection-level flow control, connection migration, and data reliability. 
+Additionally, this document describes the criteria and interface required for 
+any handshake mechanism used by QUIC
 
 Accompanying documents describe QUIC's loss detection and congestion control
-{{QUIC-RECOVERY}}, and the use of TLS 1.3 for key negotiation {{QUIC-TLS}}.
+{{QUIC-RECOVERY}}, and the instantiation of TLS 1.3 for key negotiation 
+handshake {{QUIC-TLS}}.
 
 QUIC version 1 conforms to the protocol invariants in {{QUIC-INVARIANTS}}.
 
@@ -346,10 +349,16 @@ Length:
 
 Packet Number:
 
-: The packet number field is 1, 2, or 4 octets long. The packet number has
-  confidentiality protection separate from packet protection, as described
-  in Section 5.3 of {{QUIC-TLS}}. The length of the packet number field is
-  encoded in the plaintext packet number. See {{packet-numbers}} for details.
+: The packet number field is 1, 2, or 4 octets long. The protector MUST provide 
+  confidentiality for packet numbers. This protection is separate from the 
+  packet protection and MUST achieve the following: the length of the packet 
+  number field is encoded in the plaintext packet number, the key used for 
+  protection should be derived from current set of secrets, packet number 
+  protection algorithm depends on the algorithm used for packet protection, 
+  packet number protection is applied after packet protection, and ciphertext of 
+  the packet is sampled and used as input to the protector. The TLS based 
+  handshake {{QUIC-TLS}} is one example which satisfies the aforementioned 
+  properties.
 
 Payload:
 
@@ -408,11 +417,10 @@ Header Form:
 
 : The most significant bit (0x80) of octet 0 is set to 0 for the short header.
 
-Key Phase Bit:
+PACKET_PROTECTION_FLAG:
 
-: The second bit (0x40) of octet 0 indicates the key phase, which allows a
-  recipient of a packet to identify the packet protection keys that are used to
-  protect the packet.  See {{QUIC-TLS}} for details.
+: The second bit (0x40) of octet 0 is reserved for use by the packet protection
+  mechanism. See {{QUIC-TLS}} for example usage of this bit.
 
 \[\[Editor's Note: this section should be removed and the bit definitions
 changed before this draft goes to the IESG.]]
@@ -457,10 +465,16 @@ Destination Connection ID:
 
 Packet Number:
 
-: The packet number field is 1, 2, or 4 octets long. The packet number has
-  confidentiality protection separate from packet protection, as described in
-  Section 5.3 of {{QUIC-TLS}}. The length of the packet number field is encoded
-  in the plaintext packet number. See {{packet-numbers}} for details.
+: The packet number field is 1, 2, or 4 octets long. The protector MUST provide 
+  confidentiality for packet numbers. This protection is separate from the 
+  packet protection and MUST achieve the following: the length of the packet 
+  number field is encoded in the plaintext packet number, the key used for 
+  protection should be derived from current set of secrets, packet number 
+  protection algorithm depends on the algorithm used for packet protection, 
+  packet number protection is applied after packet protection, and ciphertext of 
+  the packet is sampled and used as input to the protector. The TLS based 
+  handshake {{QUIC-TLS}} is one example which satisfies the aforementioned 
+  properties.
 
 Protected Payload:
 
@@ -634,19 +648,20 @@ agree on cryptographic keys.  The cryptographic handshake is carried in Initial
 All these packets use the long header and contain the current QUIC version in
 the version field.
 
-In order to prevent tampering by version-unaware middleboxes, Initial
-packets are protected with connection- and version-specific keys
-(Initial keys) as described in {{QUIC-TLS}}.  This protection does not
-provide confidentiality or integrity against on-path attackers, but
-provides some level of protection against off-path attackers.
+In order to prevent tampering by version-unaware middleboxes, the packet 
+protector MAY make an effort to obfuscate the contents of Initial
+packets. An example of Initial packet protection with connection- and 
+version-specific keys (Initial keys) is described in {{QUIC-TLS}}.  
+This protection does not provide confidentiality or integrity against on-path 
+attackers, but provides some level of protection against off-path attackers.
 
 
 ## Initial Packet {#packet-initial}
 
 The Initial packet uses long headers with a type value of 0x7F.  It carries the
 first CRYPTO frames sent by the client and server to perform key exchange, and
-carries ACKs in either direction. The Initial packet is protected by Initial
-keys as described in {{QUIC-TLS}}.
+carries ACKs in either direction. Depending on the handshake mechanism the 
+Initial packet MAY be protected by Initial keys, see {{QUIC-TLS}} for example.
 
 The Initial packet (shown in {{initial-format}}) has two additional header
 fields that are added to the Long Header before the Length field.
@@ -903,9 +918,11 @@ confidentiality protection that is applied after packet protection is applied
 (see {{QUIC-TLS}} for details).  The underlying packet number increases with
 each packet sent, see {{packet-numbers}} for details.
 
-The payload is protected using authenticated encryption.  {{QUIC-TLS}} describes
-packet protection in detail.  After decryption, the plaintext consists of a
-sequence of frames, as described in {{frames}}.
+The payload is protected using authenticated encryption offering at least 
+128-bits of security and using the packet header as AD. {{QUIC-TLS}} describes 
+in detail the implementation of a scheme satisfying these criteria. After 
+decryption, the plaintext consists of a sequence of frames, as described in 
+{{frames}}.
 
 
 ## Coalescing Packets {#packet-coalesce}
@@ -1044,13 +1061,13 @@ number are provided, as shown in {{pn-encodings}}.
 Note that these encodings are similar to those in {{integer-encoding}}, but
 use different values.
 
-The encoded packet number is protected as described in Section 5.3
-{{QUIC-TLS}}. Protection of the packet number is removed prior to recovering
-the full packet number. The full packet number is reconstructed at the
-receiver based on the number of significant bits present, the content of those
-bits, and the largest packet number received on a successfully authenticated
-packet. Recovering the full packet number is necessary to successfully remove
-packet protection.
+The encoded packet number is protected (Section 5.3 {{QUIC-TLS}} offers an 
+example of this protection). Protection of the packet number is removed prior to 
+recovering the full packet number. The full packet number is reconstructed at 
+the receiver based on the number of significant bits present, the content of 
+those bits, and the largest packet number received on a successfully 
+authenticated packet. Recovering the full packet number is necessary to 
+successfully remove packet protection.
 
 Once packet number protection is removed, the packet number is decoded by
 finding the packet number value that is closest to the next expected packet.
@@ -1457,7 +1474,7 @@ from an offset of 0.
 
 ## Example Handshake Flows
 
-Details of how TLS is integrated with QUIC are provided in {{QUIC-TLS}}, but
+Details of how QUIC is instantiated with TLS are provided in {{QUIC-TLS}}, but
 some examples are provided here.
 
 {{tls-1rtt-handshake}} provides an overview of the 1-RTT handshake.  Each line
@@ -4575,10 +4592,10 @@ state for closed streams, which could mean a significant state commitment.
 ## Flow Control for Cryptographic Handshake {#flow-control-crypto}
 
 Data sent in CRYPTO frames is not flow controlled in the same way as STREAM
-frames.  QUIC relies on the cryptographic protocol implementation to avoid
-excessive buffering of data, see {{QUIC-TLS}}.  The implementation SHOULD
-provide an interface to QUIC to tell it about its buffering limits so that there
-is not excessive buffering at multiple layers.
+frames.  QUIC relies on the cryptographic handshake protocol implementation to 
+avoid excessive buffering of data, see {{QUIC-TLS}} for an example.  The 
+implementation SHOULD provide an interface to QUIC to tell it about its 
+buffering limits so that there is not excessive buffering at multiple layers.
 
 
 # Error Handling
@@ -4778,10 +4795,10 @@ These protections are not intended to be effective against an attacker that is
 able to receive QUIC packets prior to the connection being established.  Such an
 attacker can potentially send packets that will be accepted by QUIC endpoints.
 This version of QUIC attempts to detect this sort of attack, but it expects that
-endpoints will fail to establish a connection rather than recovering.  For the
-most part, the cryptographic handshake protocol {{QUIC-TLS}} is responsible for
-detecting tampering during the handshake, though additional validation is
-required for version negotiation (see {{version-validation}}).
+endpoints will fail to establish a connection rather than recovering. The 
+cryptographic handshake protocol MUST ensure detection of tampering during the 
+handshake by authenticating all of the data sent in CRYPTO frames. Additional 
+validation is required for version negotiation (see {{version-validation}}).
 
 Endpoints are permitted to use other methods to detect and attempt to recover
 from interference with the handshake.  Invalid packets may be identified and
